@@ -1,26 +1,59 @@
+import 'reflect-metadata';
 import { ServiceBroker } from 'moleculer';
 import ApiGateway from 'moleculer-web';
+import { AppDataSource } from './db/dataSource';
+import { Note } from './entities/Note';
+
+import NotesService from './services/notes.service';
 
 const broker = new ServiceBroker({
   logger: true,
 });
 
-broker.createService({
-  name: 'api',
-  mixins: [ApiGateway],
-  settings: {
-    port: 3027,
-    routes: [
-      {
-        path: '/api',
-        aliases: {
-          "GET /health": () => ({ status: "OK", uptime: process.uptime() }),
-        }
-      }
-    ]
+async function initializeDatabase() {
+  try {
+    if (!AppDataSource.isInitialized) {
+      await AppDataSource.initialize();
+    }
+  } catch (error) {
+    console.error('Ошибка инициализации базы данных:', error);
+    process.exit(1);
   }
-});
+}
 
-broker.start().then(() => {
-  console.log('Бэкенд запущен на http://localhost:3027/api/health');
-});
+async function startService() {
+  await initializeDatabase();
+
+  // Создаем сервис notes
+  broker.createService(NotesService);
+
+  // Создаем API Gateway
+  broker.createService({
+    name: 'api',
+    mixins: [ApiGateway],
+    settings: {
+      port: 3000,
+      routes: [
+        {
+          path: '/api',
+          whitelist: ['notes.*'],
+          aliases: {
+            'GET notes': 'notes.list',
+            'GET notes/:id': 'notes.get',
+            'POST notes': 'notes.create',
+            'PUT notes/:id': 'notes.update',
+            'DELETE notes/:id': 'notes.delete',
+          },
+          bodyParsers: { 
+            json: { strict: false, limit: '1MB' } 
+          }
+        }
+      ]
+    }
+  });
+
+  await broker.start();
+  console.log('Бэкенд готов: http://localhost:3000/api/notes');
+}
+
+startService().catch(console.error);
